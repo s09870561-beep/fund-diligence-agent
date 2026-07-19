@@ -1,6 +1,6 @@
 # Fund Diligence Agent
 
-An AI-powered research assistant that investigates companies, venture capital firms, and investment funds — producing a structured **due-diligence brief** with verified claims, flagged uncertainties, and human-reviewable open questions.
+An AI-powered research assistant for **family offices, institutional LPs, and investment committees** — producing structured **Investment Committee Memos** with IC-confirmed findings, flagged risks, mandate fit scoring, and conflict-of-interest checks.
 
 ## What it does
 
@@ -10,8 +10,10 @@ Give it a research goal like _"Research Sequoia Capital: recent activity, leader
 2. **Gathers** — searches the web via Tavily and checks SEC EDGAR for recent 10-K filings
 3. **Synthesises** — feeds everything to an LLM that produces a structured `DiligenceBrief`
 4. **Flags uncertainty** — the model is *instructed* to put anything unclear into `open_questions` rather than guess
-5. **Human review** — lets you confirm, reject, or edit each uncertain claim
-6. **Remembers** — saves finished briefs to a local vector database (ChromaDB with all-MiniLM-L6-v2 embeddings) so you can recall them later with natural-language queries
+5. **Human review** — lets you confirm, reject, or edit each uncertain claim (IC Review workflow)
+6. **IC Memo** ��� one-page Investment Committee Memo with Executive Summary, Thesis, Risk Factors, Mandate Fit, and Recommendation
+7. **Conflict-of-Interest check** — scans portfolio holdings for potential conflicts
+8. **Remembers** — saves finished briefs to a local vector database (ChromaDB with all-MiniLM-L6-v2 embeddings) for natural-language recall
 
 ## Architecture (7 layers)
 
@@ -21,7 +23,9 @@ Give it a research goal like _"Research Sequoia Capital: recent activity, leader
 | `retrieval/` | Data gathering: web search (Tavily) and SEC EDGAR full-text lookup |
 | `tools/` | Unified `TOOL_REGISTRY` + `execute_tool()` dispatcher with OpenAI function-calling schemas |
 | `memory/` | Vector memory via ChromaDB + sentence-transformers (all-MiniLM-L6-v2) for semantic recall |
-| `presentation/` | `DiligenceBrief` Pydantic model, LLM-based synthesis, and `format_brief()` rendering |
+| `presentation/` | `DiligenceBrief` Pydantic model, LLM-based synthesis, `format_brief()` rendering, and `format_ic_memo()` for one-page Investment Committee Memos |
+| `matching/` | Investment mandate scoring (`match_mandate`) with field-level reasoning against the brief |
+| `relationships/` | Entity connection discovery (`find_connections`) and portfolio conflict-of-interest checks (`check_conflicts`) |
 | `guardrails/` | `RunGuard` (step/time/cost ceilings with `RunLimitExceeded`), loop detection, `review_open_questions()` |
 | `utils/` | `retry_with_backoff()` (exponential-backoff), `Tracer` (JSONL run logging) |
 
