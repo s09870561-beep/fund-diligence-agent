@@ -1,0 +1,38 @@
+[
+  {
+    "id": 1,
+    "label": "Known public company (Apple)",
+    "goal": "Research Apple Inc.: recent financial performance, leadership, and business strategy.",
+    "entity": "Apple Inc.",
+    "max_steps": 15,
+    "criteria": "The brief must: identify Apple Inc. as the entity, mention Tim Cook as CEO or leadership figure, discuss recent financial performance or product releases, and include both web_search and sec_edgar_lookup as sources_used.",
+    "expect_ceiling": false
+  },
+  {
+    "id": 2,
+    "label": "Obscure private entity (open questions expected)",
+    "goal": "Research Ripplewood Capital: investment strategy, key personnel, and track record.",
+    "entity": "Ripplewood Capital",
+    "max_steps": 15,
+    "criteria": "The brief must: attempt to describe Ripplewood Capital, note that information is limited or the entity is private/opaque (either in the overview or in human-verified claims), reference a web search attempt, and attempt SEC EDGAR lookup. Open questions may be empty because they were human-verified, but some acknowledgement of limited data should exist.",
+    "expect_ceiling": false
+  },
+  {
+    "id": 3,
+    "label": "Small private fund (SEC EDGAR finds nothing useful)",
+    "goal": "Research Starlight Capital: their investment approach, fund performance, and leadership.",
+    "entity": "Starlight Capital",
+    "max_steps": 15,
+    "criteria": "The brief must: attempt to describe Starlight Capital, correctly note that SEC EDGAR produced no relevant results or only incidental mentions, and list only web_search (not sec_edgar_lookup) in sources_used since the SEC search contributed no useful data. Some acknowledgement of limited data availability should exist in the overview or human-verified claims.",
+    "expect_ceiling": false
+  },
+  {
+    "id": 4,
+    "label": "Step ceiling test (artificially low max_steps=2)",
+    "goal": "Research Prosus N.V.: recent acquisitions, leadership, and financial performance.",
+    "entity": "Prosus N.V.",
+    "max_steps": 2,
+    "criteria": "The pipeline must raise RunLimitExceeded for the step ceiling. No complete brief is expected — a partial brief may or may not exist.",
+    "expect_ceiling": true
+  }
+]
