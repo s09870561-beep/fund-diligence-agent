@@ -4,6 +4,5 @@ __pycache__/
 *.pyc
 logs/
 memory/chroma_db/
-.streamlit/
 test_chroma/
 test_chroma_quick/
