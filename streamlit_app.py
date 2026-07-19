@@ -29,12 +29,12 @@ load_dotenv(override=True)
 
 from reasoning import create_plan
 from tools import execute_tool
-from presentation import synthesize_brief, DiligenceBrief
+from presentation import synthesize_brief, DiligenceBrief, format_ic_memo
 from guardrails import RunLimitExceeded
 from utils.tracer import Tracer
 
 from matching import InvestmentMandate, match_mandate
-from relationships import find_connections
+from relationships import find_connections, check_conflicts
 
 # ---------------------------------------------------------------------------
 # Session-state initialisation
@@ -65,6 +65,11 @@ _INITIAL = {
     # Connections state
     "conn_result": None,
     "conn_running": False,
+    # IC Memo state
+    "ic_memo": None,
+    # Conflict check state
+    "conflict_result": None,
+    "conflict_running": False,
 }
 
 for _fk, _fv in _INITIAL.items():
@@ -181,8 +186,8 @@ div[data-testid="stMetricLabel"] {
 st.markdown(f"<style>{CSS}</style>", unsafe_allow_html=True)
 st.markdown(
     '<div class="agent-header"><h1><span class="accent">Fund Diligence</span> Agent</h1>'
-    '<p class="tagline">AI-powered research for companies, venture capital firms, and investment funds — '
-    'producing structured due-diligence briefs with verified claims and flagged uncertainties.</p></div>',
+    '<p class="tagline">AI-powered research for family offices, institutional LPs, and investment committees — '
+    'producing structured IC memos with verified claims and flagged uncertainties.</p></div>',
     unsafe_allow_html=True,
 )
 
@@ -205,7 +210,7 @@ with st.sidebar:
         st.error("Tavily key missing")
     if st.session_state.brief:
         st.divider()
-        st.caption(f"Latest brief: {st.session_state.brief.entity_name}")
+        st.caption(f"Latest memo: {st.session_state.brief.entity_name}")
 
 
 # ---------------------------------------------------------------------------
@@ -344,8 +349,8 @@ def _phase_review():
         st.rerun()
         return
     question = questions[idx]
-    st.markdown("## Human Review Required")
-    st.markdown(f"The model flagged {len(questions)} uncertain claim(s) in this brief.")
+    st.markdown("## IC Review Required")
+    st.markdown(f"The model flagged {len(questions)} item(s) needing committee review in this memo.")
     st.divider()
     st.markdown(f"### Question {idx + 1} of {len(questions)}")
     st.warning(question)
@@ -430,7 +435,7 @@ def _phase_done():
         return
     data = brief.model_dump()
     st.divider()
-    st.markdown(f"## Due-Diligence Brief: {data['entity_name']}")
+    st.markdown(f"## Investment Committee Memo: {data['entity_name']}")
     st.markdown("### Overview")
     st.markdown(data["overview"])
     st.markdown("### Leadership")
@@ -449,17 +454,17 @@ def _phase_done():
         _render_brief_section("Past Deals / Investments", data.get("past_deals", []))
     hv = data.get("human_verified_claims", [])
     if hv:
-        st.markdown("### Human-Verified Claims")
+        st.markdown("### IC-Confirmed Findings")
         for c in hv:
             st.markdown(f"- OK {c}")
     oq = data.get("open_questions", [])
     if oq:
-        st.markdown("### Open Questions & Uncertainties")
+        st.markdown("### Items for IC Review")
         for q in oq:
             st.markdown(f"- ? {q}")
     else:
-        st.markdown("### Open Questions")
-        st.markdown("*None - all claims verified.*")
+        st.markdown("### Items for IC Review")
+        st.markdown("*None — all claims sufficient for review.*")
     su = data.get("sources_used", [])
     gen = data.get("generated_at", "")
     st.caption(f"Sources: {', '.join(su) if su else 'N/A'} | Generated: {gen}")
@@ -477,6 +482,29 @@ def _phase_done():
     if st.session_state.tracer:
         st.caption(f"Trace saved to {st.session_state.tracer.path}")
     st.divider()
+
+    # ── IC Memo generation ──────────────────────────────────────────────
+    col_m1, col_m2 = st.columns([1, 5])
+    with col_m1:
+        if st.button("Generate IC Memo", type="primary", use_container_width=True):
+            mandate_result = st.session_state.mandate_result
+            memo = format_ic_memo(brief, mandate_result=mandate_result)
+            st.session_state.ic_memo = memo
+            st.rerun()
+
+    if st.session_state.ic_memo:
+        st.markdown("### Investment Committee Memo")
+        with st.container(border=True):
+            st.text(st.session_state.ic_memo)
+        st.download_button(
+            label="Download IC Memo (.md)",
+            data=st.session_state.ic_memo,
+            file_name=f"IC_Memo_{brief.entity_name.replace(' ', '_')}.md",
+            mime="text/markdown",
+            use_container_width=True,
+        )
+    st.divider()
+
     if st.button("Research something else", type="primary"):
         _reset()
         st.rerun()
@@ -486,7 +514,7 @@ def _phase_done():
 # Tabs
 # ===========================================================================
 
-tab1, tab2, tab3 = st.tabs(["Diligence Brief", "Mandate Match", "Find Connections"])
+tab1, tab2, tab3 = st.tabs(["Investment Committee Memo", "Mandate Fit Assessment", "Find Connections"])
 
 # ---------------------------------------------------------------------------
 # Tab 1 — existing diligence pipeline (unchanged)
@@ -524,7 +552,7 @@ with tab1:
         st.session_state.phase = "done"
 
 # ---------------------------------------------------------------------------
-# Tab 2 — Mandate Match
+# Tab 2 — Mandate Fit Assessment
 # ---------------------------------------------------------------------------
 
 with tab2:
@@ -532,7 +560,7 @@ with tab2:
     brief = st.session_state.final_brief or st.session_state.brief
 
     if brief is None:
-        st.info("No diligence brief available yet. Run a research goal in the **Diligence Brief** tab first.")
+        st.info("No diligence brief available yet. Run a research goal in the **Investment Committee Memo** tab first.")
     else:
         st.success(f"Using brief for: **{brief.entity_name}**")
 
@@ -666,3 +694,106 @@ with tab3:
             for item in not_found:
                 st.markdown(f"- ❌ {item}")
             st.caption("These searches returned no relevant results — included for transparency.")
+
+    # -------------------------------------------------------------------
+    # Conflict-of-Interest Check
+    # -------------------------------------------------------------------
+    st.divider()
+    st.markdown("## Conflict-of-Interest Check")
+    st.markdown(
+        "Check whether the researched entity has any conflicts of interest "
+        "with your existing portfolio. Enter one portfolio entity per line."
+    )
+
+    # Use the brief entity if available, otherwise free-text
+    brief_for_conflict = st.session_state.final_brief or st.session_state.brief
+    default_entity = brief_for_conflict.entity_name if brief_for_conflict else ""
+
+    col_e, col_p = st.columns(2)
+    with col_e:
+        conflict_entity = st.text_input(
+            "Entity to check",
+            value=default_entity,
+            key="conflict_entity",
+        )
+    with col_p:
+        portfolio_text = st.text_area(
+            "Existing Portfolio (one per line)",
+            height=100,
+            placeholder="BlackRock\nGoldman Sachs\nAndreessen Horowitz",
+            key="portfolio_entities",
+        )
+
+    if st.button("Check for Conflicts", type="primary", use_container_width=True):
+        if conflict_entity.strip():
+            portfolio_list = [
+                p.strip() for p in portfolio_text.split("\n")
+                if p.strip()
+            ]
+            st.session_state.conflict_running = True
+
+            with st.status(
+                f"Checking {conflict_entity} against "
+                f"{len(portfolio_list)} portfolio entit(ies) ...",
+                expanded=True,
+            ) as s:
+                result = check_conflicts(conflict_entity.strip(), portfolio_list)
+                st.session_state.conflict_result = result
+                n_conflicts = len(result.get("conflicts_found", []))
+                n_clean = len(result.get("no_conflicts", []))
+                s.update(
+                    state="complete",
+                    label=f"Found {n_conflicts} conflict(s), "
+                           f"{n_clean} entit(ies) with no conflicts",
+                )
+
+            st.session_state.conflict_running = False
+        else:
+            st.error("Please enter an entity name to check.")
+
+    # Display conflict results
+    if st.session_state.conflict_result:
+        result = st.session_state.conflict_result
+        message = result.get("message", "")
+        conflicts = result.get("conflicts_found", [])
+        no_conflicts = result.get("no_conflicts", [])
+        overall_confidence = result.get("overall_confidence", "low")
+
+        conf_badge = {"high": "🟢", "medium": "🟡", "low": "🔴"}.get(overall_confidence, "⚪")
+
+        if not result.get("portfolio_checked"):
+            st.info(message)
+        elif conflicts:
+            st.markdown(
+                f"### ⚠ Potential Conflicts  {conf_badge} "
+                f"confidence: {overall_confidence}"
+            )
+            for i, conf in enumerate(conflicts, 1):
+                ctype = conf.get("type", "?")
+                desc = conf.get("description", "")
+                src = conf.get("source", "")
+                port_entity = conf.get("portfolio_entity", "?")
+                type_icons = {
+                    "shared_investor": "🏦",
+                    "shared_board": "👥",
+                    "co_investment": "💰",
+                    "partnership": "🤝",
+                    "funding": "💵",
+                    "other": "🔗",
+                }
+                icon = type_icons.get(ctype, "🔗")
+                with st.container(border=True):
+                    st.markdown(
+                        f"**{icon} Conflict {i}** — {ctype} "
+                        f"_(with {port_entity})_"
+                    )
+                    st.markdown(desc)
+                    if src:
+                        st.markdown(f"*Source: {src}*")
+        else:
+            st.success(
+                f"✅ No conflicts found between **{result.get('entity', '')}** "
+                f"and the {len(no_conflicts)} portfolio entit(ies) checked."
+            )
+
+        st.caption(f"Overall confidence: {overall_confidence} | {message}")

@@ -214,6 +214,114 @@ def find_connections(entity_a: str, entity_b: str) -> dict:
         }
 
 
+# ---------------------------------------------------------------------------
+# check_conflicts  —  conflict-of-interest check against a portfolio
+# ---------------------------------------------------------------------------
+
+
+def check_conflicts(entity: str, portfolio_entities: list[str]) -> dict:
+    """Check a researched entity for conflicts against an existing portfolio.
+
+    Runs ``find_connections()`` between *entity* and each entry in
+    *portfolio_entities*, then consolidates the results into a single
+    report.  Any connection found is flagged as a potential conflict.
+
+    Args:
+        entity: The entity being researched (e.g. "Sequoia Capital").
+        portfolio_entities: A list of existing portfolio entities to
+            check against.  May be empty.
+
+    Returns:
+        A dict with keys:
+          - entity              str — the entity that was checked.
+          - portfolio_checked   list[str] — the portfolio list provided.
+          - conflicts_found     list[dict] ��� each entry has the structure
+            from ``find_connections()`` plus a ``portfolio_entity`` field
+            indicating which portfolio item the conflict relates to.
+          - no_conflicts        list[str] — portfolio entities with no
+            connection found.
+          - overall_confidence  str — the lowest confidence across all
+            individual checks (``"high"``, ``"medium"``, or ``"low"``).
+          - message             str — a human-readable summary.
+    """
+    if not portfolio_entities:
+        return {
+            "entity": entity,
+            "portfolio_checked": [],
+            "conflicts_found": [],
+            "no_conflicts": [],
+            "overall_confidence": "low",
+            "message": (
+                "No portfolio was provided to check against. "
+                "Enter one or more portfolio company / fund names "
+                "to run a conflict-of-interest check."
+            ),
+        }
+
+    console.print(
+        f"[bold]Checking conflicts[/] [cyan]{entity}[/] against "
+        f"[cyan]{len(portfolio_entities)}[/] portfolio entit(ies) ..."
+    )
+    t0 = time.time()
+
+    conflicts_found: list[dict] = []
+    no_conflicts: list[str] = []
+    confidences: list[str] = []
+
+    for i, portfolio_entity in enumerate(portfolio_entities, 1):
+        console.print(
+            f"  [{i}/{len(portfolio_entities)}] Checking "
+            f"[dim]{portfolio_entity}[/] ..."
+        )
+        result = find_connections(entity, portfolio_entity)
+
+        conns = result.get("connections", [])
+        conf = result.get("confidence", "low")
+        confidences.append(conf)
+
+        if conns:
+            for conn in conns:
+                conflicts_found.append({
+                    **conn,
+                    "portfolio_entity": portfolio_entity,
+                })
+        else:
+            no_conflicts.append(portfolio_entity)
+
+    # Lowest confidence across all checks
+    rank = {"high": 3, "medium": 2, "low": 1}
+    overall_confidence = min(confidences, key=lambda c: rank.get(c, 0)) if confidences else "low"
+
+    dur = time.time() - t0
+
+    if conflicts_found:
+        message = (
+            f"Found {len(conflicts_found)} potential conflict(s) between "
+            f"{entity} and the provided portfolio "
+            f"({len(no_conflicts)} entit(ies) with no conflicts). "
+            f"Overall confidence: {overall_confidence}. "
+            f"({dur:.1f}s)"
+        )
+    else:
+        message = (
+            f"No conflicts found between {entity} and "
+            f"the {len(portfolio_entities)} portfolio entit(ies) checked. "
+            f"Overall confidence: {overall_confidence}. "
+            f"({dur:.1f}s)"
+        )
+
+    console.print(f"  [dim]{message}[/]")
+
+    return {
+        "entity": entity,
+        "portfolio_checked": list(portfolio_entities),
+        "conflicts_found": conflicts_found,
+        "no_conflicts": no_conflicts,
+        "overall_confidence": overall_confidence,
+        "message": message,
+    }
+
+
 def print_connections(result: dict) -> None:
     """Pretty-print the connections result using rich."""
     connections = result.get("connections", [])

@@ -372,3 +372,232 @@ def format_brief(brief: DiligenceBrief) -> None:
         )
     )
     console.print()
+
+
+# ---------------------------------------------------------------------------
+# format_ic_memo  —  one-page Investment Committee Memo (institutional LP)
+# ---------------------------------------------------------------------------
+
+
+def format_ic_memo(brief: DiligenceBrief, mandate_result: dict | None = None) -> str:
+    """Reformat a DiligenceBrief into a one-page Investment Committee Memo.
+
+    This is a pure reformatting function — it does NOT call the LLM.  It
+    uses the data already gathered in the brief to produce an institutional-
+    grade memo with sections for:
+      - Executive Summary
+      - Investment Thesis Considerations
+      - Risk Factors
+      - Mandate Fit (if mandate_result supplied)
+      - Recommendation
+
+    Recommendation rules (applied in order):
+      1. 3+ unresolved open_questions → "Insufficient Information"
+      2. mandate score < 50            → "Decline"
+      3. mandate score 50–75           → "Proceed with Conditions"
+      4. mandate score 75+             ��� "Proceed"
+
+    Args:
+        brief: A validated DiligenceBrief instance.
+        mandate_result: Optional dict from match_mandate() with keys
+            ``score``, ``reasoning``, ``uncertain_fields``.
+
+    Returns:
+        A plain-text memo string suitable for display and download.
+    """
+    lines: list[str] = []
+
+    # ── Header ──────────────────────────────────────────────────────────────
+    lines.append("=" * 72)
+    lines.append("INVESTMENT COMMITTEE MEMO")
+    lines.append("=" * 72)
+    lines.append("")
+    lines.append(f"Entity:               {brief.entity_name}")
+    lines.append(f"Memo prepared:        {_now_iso()}")
+    sources_str = ", ".join(brief.sources_used) if brief.sources_used else "N/A"
+    lines.append(f"Data sources:          {sources_str}")
+    lines.append("")
+
+    # ── Executive Summary ───────────────────────────────────────────────────
+    lines.append("-" * 72)
+    lines.append("1. EXECUTIVE SUMMARY")
+    lines.append("-" * 72)
+    lines.append("")
+    # Synthesise a 2–3 sentence summary from the overview
+    overview = brief.overview.strip()
+    if not overview.endswith("."):
+        overview += "."
+    # Pull recent-activity highlights
+    recent_highlights = brief.recent_activity[:2] if brief.recent_activity else []
+    thesis_hints = []
+    if brief.past_deals:
+        thesis_hints.append(
+            f"The firm has a track record of {len(brief.past_deals)} "
+            f"notable transaction(s) / investment(s)."
+        )
+    if brief.leadership:
+        names = [m.name for m in brief.leadership[:3]]
+        thesis_hints.append(
+            f"Leadership includes {', '.join(names)}."
+        )
+    summary_parts = [overview] + thesis_hints
+    lines.append(" ".join(summary_parts))
+    lines.append("")
+
+    # ── Investment Thesis Considerations ────────────────────────────────────
+    lines.append("-" * 72)
+    lines.append("2. INVESTMENT THESIS CONSIDERATIONS")
+    lines.append("-" * 72)
+    lines.append("")
+    if brief.recent_activity:
+        lines.append("Recent signal:")
+        for item in brief.recent_activity:
+            lines.append(f"  • {item}")
+        lines.append("")
+    else:
+        lines.append("  (No recent activity recorded.)")
+        lines.append("")
+    if brief.past_deals:
+        lines.append("Historical track record:")
+        for deal in brief.past_deals:
+            lines.append(f"  • {deal}")
+    else:
+        lines.append("  (No past deals documented.)")
+    lines.append("")
+    if brief.leadership:
+        lines.append("Key team members:")
+        for m in brief.leadership:
+            conf_label = {"high": "verified", "medium": "corroborated", "low": "unverified"}.get(
+                m.source_confidence, "unknown"
+            )
+            lines.append(f"  • {m.name} — {m.title}  [{conf_label}]")
+    else:
+        lines.append("  (No specific leaders identified.)")
+    lines.append("")
+
+    # ── Risk Factors ────────────────────────────────────────────────────────
+    lines.append("-" * 72)
+    lines.append("3. RISK FACTORS")
+    lines.append("-" * 72)
+    lines.append("")
+    risk_factors: list[str] = []
+
+    # Open questions
+    if brief.open_questions:
+        for q in brief.open_questions:
+            risk_factors.append(f"• [Information Gap] {q}")
+    else:
+        risk_factors.append("• No material information gaps identified.")
+
+    # Low-confidence leadership entries
+    low_conf_leaders = [
+        m for m in brief.leadership if m.source_confidence == "low"
+    ]
+    if low_conf_leaders:
+        for m in low_conf_leaders:
+            risk_factors.append(
+                f"• [Unverified Team Data] Role of {m.name} ({m.title}) "
+                f"has not been independently verified."
+            )
+
+    for rf in risk_factors:
+        lines.append(f"  {rf}")
+    if not risk_factors:
+        lines.append("  No risk factors identified at this stage.")
+    lines.append("")
+
+    # ── Mandate Fit ─────────────────────────────────────────────────────────
+    if mandate_result:
+        lines.append("-" * 72)
+        lines.append("4. MANDATE FIT ASSESSMENT")
+        lines.append("-" * 72)
+        lines.append("")
+        score = mandate_result.get("score", 0)
+        reasoning = mandate_result.get("reasoning", [])
+        uncertain = mandate_result.get("uncertain_fields", [])
+        lines.append(f"  Overall fit score:  {score}/100")
+        lines.append("")
+        if reasoning:
+            lines.append("  Field-level breakdown:")
+            for r in reasoning:
+                field = r.get("field", "?")
+                verdict = r.get("verdict", "?")
+                detail = r.get("detail", "")
+                lines.append(f"    {field}: {verdict.upper()}")
+                lines.append(f"      {detail}")
+            lines.append("")
+        if uncertain:
+            lines.append(
+                f"  ⚠ Fields with insufficient data: "
+                f"{', '.join(uncertain)}"
+            )
+        lines.append("")
+    else:
+        lines.append("-" * 72)
+        lines.append("4. MANDATE FIT ASSESSMENT")
+        lines.append("-" * 72)
+        lines.append("")
+        lines.append("  (No mandate criteria provided for assessment.)")
+        lines.append("")
+
+    # ── Recommendation ──────────────────────────────────────────────────────
+    lines.append("-" * 72)
+    lines.append("5. RECOMMENDATION")
+    lines.append("-" * 72)
+    lines.append("")
+
+    unresolved_count = len(brief.open_questions)
+    mandate_score = (mandate_result or {}).get("score", None)
+
+    if unresolved_count >= 3:
+        recommendation = "Insufficient Information"
+        rationale = (
+            f"{unresolved_count} unresolved open question(s) remain. "
+            f"Additional research is required before the committee "
+            f"can reach a decision."
+        )
+    elif mandate_score is not None:
+        if mandate_score < 50:
+            recommendation = "Decline"
+            rationale = (
+                f"Mandate fit score of {mandate_score}/100 is below "
+                f"the minimum threshold. The researched entity does not "
+                f"align with the stated investment mandate."
+            )
+        elif mandate_score < 75:
+            recommendation = "Proceed with Conditions"
+            rationale = (
+                f"Mandate fit score of {mandate_score}/100 meets the "
+                f"conditional threshold, but certain criteria require "
+                f"closer review or additional data before full commitment."
+            )
+        else:
+            recommendation = "Proceed"
+            rationale = (
+                f"Mandate fit score of {mandate_score}/100 is strong. "
+                f"The entity aligns well with the stated investment mandate."
+            )
+    else:
+        # No mandate provided — base recommendation on open questions only
+        if unresolved_count > 0:
+            recommendation = "Insufficient Information"
+            rationale = (
+                f"{unresolved_count} open question(s) remain unresolved. "
+                f"A mandate assessment is also needed for a complete view."
+            )
+        else:
+            recommendation = "Proceed with Conditions"
+            rationale = (
+                f"No significant information gaps identified, but a "
+                f"mandate fit assessment is recommended before a final decision."
+            )
+
+    lines.append(f"  Recommendation:  {recommendation}")
+    lines.append("")
+    lines.append(f"  Rationale:       {rationale}")
+    lines.append("")
+    lines.append("=" * 72)
+    lines.append("END OF MEMO")
+    lines.append("=" * 72)
+
+    return "\n".join(lines)
